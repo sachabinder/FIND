@@ -1,5 +1,5 @@
-DATASET_FOLDER: ''  # Enter directory of Foot3D
-DATASET_JSON: ''  # Enter json location for Foot3D
+DATASET_FOLDER: '/home/binders/FIND/foot3d_dataset'  # Enter directory of Foot3D
+DATASET_JSON: '/home/binders/FIND/foot3d_dataset/foot3d_slice.json'  # Enter json location for Foot3D
 
 DATASET_NAME: "Meshes_sliced"
 LOWPOLY_DATASET_NAME: "Meshes_sliced_simplified"

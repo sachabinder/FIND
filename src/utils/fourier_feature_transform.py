@@ -4,6 +4,7 @@ https://github.com/threedle/text2mesh"""
 import torch
 import numpy as np
 
+
 class FourierFeatureTransform(torch.nn.Module):
     """
     An implementation of Gaussian Fourier feature mapping.
@@ -30,12 +31,15 @@ class FourierFeatureTransform(torch.nn.Module):
 
         # x can have any number of dimensions, but only the final dimension is preserved through these operations
         xshape = x.shape
-        x = x.reshape(-1, x.shape[-1]) # [..., num_channels]
+        x = x.reshape(-1, x.shape[-1])  # [..., num_channels]
 
         batches, channels = x.shape
 
-        assert channels == self._num_input_channels, \
-            "Expected input to have {} channels (got {} channels)".format(self._num_input_channels, channels)
+        assert (
+            channels == self._num_input_channels
+        ), "Expected input to have {} channels (got {} channels)".format(
+            self._num_input_channels, channels
+        )
 
         # Make shape compatible for matmul with _B.
         # From [B, C, W, H] to [(B*W*H), C].
