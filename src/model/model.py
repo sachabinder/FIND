@@ -183,6 +183,8 @@ class LatentVector(nn.Module):
 
 class Model(nn.Module):
     def save_model(self, out_dir="models/tmp", fname="model_tmp"):
+        """Save model weighs in a pth file"""
+
         data = {"state_dict": self.state_dict()}
         data["params"] = self.params
 
@@ -190,6 +192,7 @@ class Model(nn.Module):
         torch.save(data, os.path.join(out_dir, fname + ".pth"))
 
     def freeze(self):
+        """Freez model parametters"""
         for param in self.parameters():
             param.requires_grad = False
 
@@ -210,6 +213,7 @@ class Model(nn.Module):
                 "latent_labels", None
             )  # Rewrite latent labels parameter
 
+        # Setup pretrained model
         state_dict = data["state_dict"]
         model = cls(**data["params"], device=device, opts=opts)
         model.configure_template(state_dict, device=device)
@@ -601,6 +605,7 @@ class NeuralDisplacementField(Model):
             batch = pos.shape[0]
             np = 1
 
+        # positional encoding
         for layer in self.encoder:
             pos = layer(pos)  # Encode position
 
@@ -608,6 +613,7 @@ class NeuralDisplacementField(Model):
         for layer in self.base:
             x = layer(x)
 
+        # Displacement vector, concat of g, z_p and z_s
         disp_input = x
         if shapevec is not None:
             disp_input = torch.cat([disp_input, shapevec], dim=-1)
@@ -615,12 +621,13 @@ class NeuralDisplacementField(Model):
         if posevec is not None:
             disp_input = torch.cat([disp_input, posevec], dim=-1)
 
+        # Color vector, concat of g and z_t
         col_input = x
         if texvec is not None:
             col_input = torch.cat([col_input, texvec], dim=-1)
 
-        disp = self.mlp_disp(disp_input)
-        col = self.mlp_col(col_input)
+        disp = self.mlp_disp(disp_input)  # displacement forward
+        col = self.mlp_col(col_input)  # color forward
 
         out = {}
 
