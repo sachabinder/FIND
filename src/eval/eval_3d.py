@@ -80,52 +80,79 @@ def main(
 
     os.makedirs(out_dir, exist_ok=True)
 
+    # Get options form
     opts = process_opts(opts, eval=True)
     opts.load_model = src
     opts.device = device
+
+    # select model from option and put it in evaluation mode
     model = model_from_opts(opts)
     model = model.eval().to(device)
+
+    # setup for renders
     imsize = 256
     renderer = FootRenderer(image_size=imsize, device=device)
 
+    # batch collate function selector
     collate_fn = BatchCollator(device=device).collate_batches
+    # load dataset
     dataset = Foot3DDataset(
         left_only=True, tpose_only=False, is_train=False, device=device
     )
+    # ground truth data (loaded with the pytorch dataloader)
     gt_loader = DataLoader(dataset, shuffle=False, collate_fn=collate_fn)
-
+    # select the template feet (id) from the configuration
     template_foot = cfg["TEMPLATE_FEET"][0]
+    # load the template feet from the dataset
     template_dset = Foot3DDataset(
         left_only=True, tpose_only=True, specific_feet=[template_foot], device=device
     )
 
+    import pdb
+
+    pdb.set_trace()
+
     # For each foot in dataset, get GT keypooints, and validation keypoints
-    kp_labels = dataset.keypoint_labels
-    gt_kps = torch.zeros((len(dataset), dataset.nkeypoints, 3)).to(device)
+    kp_labels = (
+        dataset.keypoint_labels
+    )  # keypoints labels (['Big toe', 'Toe 4', 'Toe 3', 'Toe 2', 'Small toe', 'Heel'])
+    gt_kps = torch.zeros((len(dataset), dataset.nkeypoints, 3)).to(
+        device
+    )  # last dim of 3 for xyz coords
     foot_names = []
     gt_meshes = []
 
     out_data = defaultdict(list)
 
-    def render_correspondences(meshes, keypoints, out_loc):
+    def render_correspondences(meshes, keypoints: torch.tensor, out_loc: str) -> None:
+        """
+        Function that render an image of meshes
+        with keypoints and save it on a given location
+        """
         # Render feet to images
-        R, T = renderer.view_from("topdown")
+        R, T = renderer.view_from("topdown")  # create a camera
         out = renderer(
             meshes, R, T, return_images=True, keypoints=keypoints, keypoints_blend=True
-        )
+        )  # create the render with the giver camera
+        # convert and save to an image
         imkp = out["keypoints_blend"].cpu().detach().numpy()
         img = (np.hstack(imkp[:, 0]) * 255).astype(np.uint8)
         cv2.imwrite(out_loc, cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
+    # retrieve latent vectors depending on the model used
     if opts.model_type in ["neural", "pca"]:
-        latent_vecs = [model.reg_val, model.shapevec_val]
+        latent_vecs = [
+            model.reg_val,
+            model.shapevec_val,
+        ]  # shape latent vector + TODO : what is reg_val
         if opts.model_type == "neural":
-            latent_vecs.append(model.texvec_val)
+            latent_vecs.append(model.texvec_val)  # texture latent vector
 
         if opts.use_pose_code:
-            latent_vecs.append(model.posevec_val)
+            latent_vecs.append(model.posevec_val)  # pose latent vector
 
     elif opts.model_type == "supr":
+        # When SUPR is used (beta: pose, shape, TODO : trans_val, TODO : reg_val)
         latent_vecs = [model.betas_val, model.pose_val, model.trans_val, model.reg_val]
 
     # with NoTextureLoading(dataset, template_dset):
