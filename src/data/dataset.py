@@ -56,14 +56,18 @@ class BatchCollator:
     def __init__(self, device="cuda"):
         self.device = device
 
-    def collate_batches(self, batch: List[Dict]):
+    def collate_batches(self, batch: List[Dict]) -> Dict:
+        """Convert verts, faces into Pytorch3D mesh and remove texture on a batch"""
+        # remove "verts", "faces" and "textures from batch elements
         non_mesh_batch = [
             {k: v for k, v in e.items() if k not in ["verts", "faces", "textures"]}
             for e in batch
         ]
+        # convert to torch format
         collated_dict = _utils.collate.default_collate(non_mesh_batch)
-
+        # convert "verts", "faces" into a PyTorch3D mesh
         collated_dict["mesh"] = collate_batched_meshes(batch).to(self.device)
+        # Put all tensor on the good device
         for k, v in collated_dict.items():
             if torch.is_tensor(v):
                 collated_dict[k] = v.to(self.device)
