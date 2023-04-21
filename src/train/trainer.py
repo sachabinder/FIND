@@ -7,8 +7,10 @@ from matplotlib import pyplot as plt
 import torch
 from src.train.opts import Opts
 from src.utils.pytorch3d_tools import to_trimesh
+from src.model.model import LatentVector
 import trimesh
 import os
+from typing import Dict, List
 
 nn = torch.nn
 
@@ -28,10 +30,17 @@ def batch_to_device(batch, device="cuda"):
     return out
 
 
-def sample_latent_vectors(batch, latent_vectors):
-    """Sample latent vectors with batch. Return as dictionary"""
+def sample_latent_vectors(batch: Dict, latent_vectors: List[LatentVector]) -> Dict:
+    """
+    For a given batch, sample the latent vectors according to those given in latent_vectors
+    Returns a Dict with keys : key of the latent vect, and val : latent vector value.
+    """
     if latent_vectors is None:
         return {}
+
+    import pdb
+
+    pdb.set_trace()
 
     out = {}
     for vec in latent_vectors:
@@ -41,7 +50,9 @@ def sample_latent_vectors(batch, latent_vectors):
             assert (
                 label_key in batch
             ), f"Trying to sample from latent vector {label_key} using keys, but not found in dataset"
-            out[vec.name] = vec[batch[label_key]]
+            out[vec.name] = vec[
+                batch[label_key]
+            ]  # get the latent vector value from data stored in it
 
         # Otherwise, just access by index in dataset
         else:
