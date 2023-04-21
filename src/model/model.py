@@ -150,6 +150,9 @@ class LatentVector(nn.Module):
     def __len__(self):
         return self.dataset_size
 
+    def __repr__(self):
+        return f"LatentVector({self.name})"
+
     def __getitem__(self, idx):
         if isinstance(idx, int):
             return self.data[idx]

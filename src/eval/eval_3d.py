@@ -108,10 +108,6 @@ def main(
         left_only=True, tpose_only=True, specific_feet=[template_foot], device=device
     )
 
-    import pdb
-
-    pdb.set_trace()
-
     # For each foot in dataset, get GT keypooints, and validation keypoints
     kp_labels = (
         dataset.keypoint_labels
@@ -157,9 +153,13 @@ def main(
 
     # with NoTextureLoading(dataset, template_dset):
     predictions = []
+
+    # itterate over the ground truth data
     for n, batch in enumerate(gt_loader):
-        kp_idxs = batch["kp_idxs"].long()
-        gt_kps[n] = batch["mesh"].verts_packed()[kp_idxs]
+        kp_idxs = batch["kp_idxs"].long()  # cast ground truth keypoints index in int64
+        gt_kps[n] = batch["mesh"].verts_packed()[
+            kp_idxs
+        ]  # get the ground truth keypoints
         foot_names.append(batch["name"][0])
         gt_meshes.append(batch["mesh"])
 
