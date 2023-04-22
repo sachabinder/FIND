@@ -38,10 +38,6 @@ def sample_latent_vectors(batch: Dict, latent_vectors: List[LatentVector]) -> Di
     if latent_vectors is None:
         return {}
 
-    import pdb
-
-    pdb.set_trace()
-
     out = {}
     for vec in latent_vectors:
         # Access by labels if given

@@ -154,7 +154,7 @@ def main(
     # with NoTextureLoading(dataset, template_dset):
     predictions = []
 
-    # itterate over the ground truth data
+    # itterate over the ground truth data and compute the forward pass (predictions)
     for n, batch in enumerate(gt_loader):
         kp_idxs = batch["kp_idxs"].long()  # cast ground truth keypoints index in int64
         gt_kps[n] = batch["mesh"].verts_packed()[
@@ -165,16 +165,23 @@ def main(
 
         # Load predicted mesh
         mesh_kwargs = {}
-        batch.update(**sample_latent_vectors(batch, latent_vecs))
+        batch.update(
+            **sample_latent_vectors(batch, latent_vecs)
+        )  # add latent vectors value in batch
+
         mesh_kwargs = {
             k: batch.get(k + "_val", None)
             for k in ["reg", "shapevec", "posevec", "texvec"]
-        }
+        }  # not used
         # res = model.get_meshes(**mesh_kwargs)
-        res = model.get_meshes_from_batch(batch, is_train=False)
+        res = model.get_meshes_from_batch(
+            batch, is_train=False
+        )  # result of the forward pass into the model, return 'meshes', 'offsets', 'verts', 'disp', 'col'
         predictions.append(res)
-
+    # concatenate the ground truth meshes
     gt_meshes = join_meshes_as_batch(gt_meshes)
+
+    # render an image file of gt
     if not no_rendering:
         render_correspondences(gt_meshes, gt_kps, os.path.join(out_dir, "gt.png"))
 
@@ -186,8 +193,11 @@ def main(
     elif opts.model_type == "supr":
         template_kp_idxs = cfg["SUPR_KEYPOINTS"]
 
+    # predictions meshes and keypoints
     pred_kps = torch.cat([r["verts"] for r in predictions])[:, template_kp_idxs]
     pred_meshes = join_meshes_as_batch([r["meshes"] for r in predictions])
+
+    # render an image file of prediction
     if not no_rendering:
         render_correspondences(pred_meshes, pred_kps, os.path.join(out_dir, "pred.png"))
 

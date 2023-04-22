@@ -709,6 +709,10 @@ class NeuralDisplacementField(Model):
         return dict(meshes=meshes, offsets=offsets, verts=X, **res)
 
     def get_meshes_from_batch(self, batch, is_train=True, no_displacement=False):
+        """
+        Doing forward over the model on the entire template mesh, sample *all* points
+        From a batch
+        """
         svec, tvec, pvec, reg = [
             f"{a}_{['val', 'train'][is_train]}"
             for a in ["shapevec", "texvec", "posevec", "reg"]
