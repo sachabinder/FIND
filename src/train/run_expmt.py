@@ -9,6 +9,8 @@ from multiprocessing import Process
 
 
 class Exp:
+    """Class that represent an experiment"""
+
     def __init__(self, opts):
         self.opts = opts
 
@@ -23,6 +25,8 @@ class Exp:
 
 
 class Queue:
+    """Execution Queue"""
+
     def __init__(self, expmt_list):
         self.expmt_list = expmt_list
 
@@ -31,7 +35,7 @@ class Queue:
             expmt.run()
 
 
-def main(cfg_file):
+def main(cfg_file: str) -> None:
     with open(cfg_file) as infile:
         cfg = yaml.load(infile, Loader=yaml.FullLoader)
 

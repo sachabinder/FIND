@@ -221,7 +221,7 @@ def main(
 
     chamf_z_cutoff = torch.mean(torch.stack(chamf_cutoffs))
 
-    # Render 6 spins per model - GT Color, GT geom, GT Chamf, Pred Color, Pred Geom, Pred Chamf
+    # Render  - GT Color, GT geom, GT Chamf, Pred Color, Pred Geom, Pred Chamf
     if produce_spins:
         spins_dir = os.path.join(out_dir, "spins")
         os.makedirs(spins_dir, exist_ok=True)

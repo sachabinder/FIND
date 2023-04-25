@@ -127,15 +127,15 @@ class Foot3DDataset(Dataset):
         self,
         dataset_json=cfg["DATASET_JSON"],
         N: int = None,
-        tpose_only=False,
-        left_only=True,
+        tpose_only: bool = False,
+        left_only: bool = True,
         specific_feet: list = None,
-        full_caching=False,
-        is_train=True,
-        train_and_val=False,
-        device="cuda",
-        low_res_textures=False,
-        low_poly_meshes=False,
+        full_caching: bool = False,
+        is_train: bool = True,
+        train_and_val: bool = False,
+        device: str = "cuda",
+        low_res_textures: bool = False,
+        low_poly_meshes: bool = False,
     ):
         """
 
@@ -217,6 +217,7 @@ class Foot3DDataset(Dataset):
 
     def get_keys(self, idx):
         """Get keys for shape, pose, tex, reg for a given foot"""
+
         ann = self.data[idx]
         foot_id = ann["Foot ID"]
         scan_id = ann["Scan ID"]

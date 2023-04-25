@@ -127,11 +127,13 @@ def train_network(
     print(f"STAGE FINISHED! Best epoch = {best_epoch}")
 
 
-def run(args: Opts):
+def run(args: Opts) -> None:
     """
     Main fuction for training
     :param args: Options of training (arguments)
     """
+
+    # device selection
     device = "cpu" if args.gpu == -1 else f"cuda:{args.gpu}"
     if args.gpu > -1:
         torch.cuda.set_device(
@@ -153,7 +155,7 @@ def run(args: Opts):
         full_caching=args.full_caching,
         low_res_textures=args.low_res_textures,
         low_poly_meshes=args.low_poly_meshes,
-    )
+    )  # kwargs for dataset importation
     train_dataset = Foot3DDataset(
         **dset_kwargs,
         is_train=True,
@@ -161,14 +163,14 @@ def run(args: Opts):
         train_and_val=args.train_and_val,
         specific_feet=specific_feet,
         device=device,
-    )
+    )  # training dataset
     val_dataset = Foot3DDataset(
         **dset_kwargs,
         is_train=False,
         specific_feet=specific_feet,
         device=device,
         N=args.n_val,
-    )
+    )  # validation dataset
 
     print(f"Num items: {len(train_dataset)} train, {len(val_dataset)} val.")
 
@@ -189,10 +191,12 @@ def run(args: Opts):
 
     latent_labels = None
     if args.use_latent_labels:
+        # add train dataset latent labels
         latent_labels = train_dataset.get_all_keys()
+        # add validation latent labels
         for k, v in val_dataset.get_all_keys().items():
             latent_labels[k + "_val"] = v
-
+    # model selection
     model = ModelWithLoss(
         opts=args,
         device=device,
@@ -212,12 +216,15 @@ def run(args: Opts):
         latent_labels=latent_labels,
     )
 
+    # switch model to corresponding device
     model = model.to(device)
 
+    # optimizer selection for network/regularisation/validation
     optim_network = torch.optim.Adam(model.model.main_params, lr=args.lr_net)
     optim_reg = torch.optim.SGD(model.model.reg_params, lr=args.lr_reg, momentum=0.9)
     optim_val = torch.optim.Adam(model.model.latent_params, lr=args.lr_val)
 
+    # optimizer selection for latent vector
     if args.latent_optim == "Adam":
         optim_latent = torch.optim.Adam(model.model.latent_params, lr=args.lr_latent)
     else:
@@ -225,6 +232,7 @@ def run(args: Opts):
             model.model.latent_params, lr=args.lr_latent, momentum=0.9
         )
 
+    # dirrectories configuration
     out_dir = os.path.join(args.save_dir, args.model_name)
     checkpoint_dir = os.path.join(out_dir, "checkpoints")
     args.vis_dir = os.path.join(out_dir, "vis")
@@ -236,6 +244,7 @@ def run(args: Opts):
     # save options
     args.save(os.path.join(out_dir, "opts.yaml"))
 
+    # logger
     logger = Logger(os.path.join(out_dir, "log.txt"), overwrite_log=True)
     sys.stdout = logger
 
@@ -261,7 +270,7 @@ def run(args: Opts):
         val_optim=optim_val,
         device=device,
         n_repeat=args.net_repeat_dataset,
-    )
+    )  # trainer for the network
     trainer_latent = Trainer(
         [optim_latent],
         model,
@@ -272,14 +281,18 @@ def run(args: Opts):
         latent_vectors_val=model.model.latent_vectors_val,
         val_optim=optim_latent,
         device=device,
-    )
+    )  # trainer for the latent
+
+    import pdb
+
+    pdb.set_trace()
 
     # Stage 1 - Registration
     if args.reg:
         print("STAGE 1 - REGISTRATION")
         with NoTextureLoading(train_dataset, val_dataset):
             for epoch in range(args.reg_epochs):
-                model_kwargs = model_kwargs = dict(
+                model_kwargs = dict(
                     chamf=True, smooth=False, gt_z_cutoff=args.gt_z_cutoff
                 )
                 msgt = trainer_reg.train_epoch(epoch, model_kwargs=model_kwargs)

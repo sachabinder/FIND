@@ -201,6 +201,8 @@ class Model(nn.Module):
 
     @classmethod
     def load(cls, file, device="cuda", opts=None, **kwargs):
+        """Load models params from a .pth file"""
+
         ext = os.path.splitext(file)[-1]
         assert (
             ext == ".pth"
@@ -1373,15 +1375,23 @@ def model_from_opts(opts: Union[Opts, str]):
 class ModelWithLoss(nn.Module):
     def __init__(self, *args, opts: Opts = None, device="cuda", **kwargs):
         super().__init__()
+        # selecting the model backbone throught options
         model_class = model_class_from_opts(opts)
+
+        # load model params
         load = opts.load_model
         if load == "":
-            self.model = model_class(*args, **kwargs, device=device, opts=opts)
+            self.model = model_class(
+                *args, **kwargs, device=device, opts=opts
+            )  # non pre trained model
         else:
-            self.model = model_class.load(load, device=device, **kwargs, opts=opts)
+            self.model = model_class.load(
+                load, device=device, **kwargs, opts=opts
+            )  # pre trained model
 
         self.device = device
 
+        # Define losses
         self.def_loss = DisplacementLoss()
         self.col_loss = TextureLossGTSpace()
 
@@ -1391,6 +1401,8 @@ class ModelWithLoss(nn.Module):
         max_faces_per_bin = (
             30000 if not opts.low_poly_meshes else None
         )  # Heuristic max_faces_per_bin for fast and effective rendering
+
+        # rendering function
         self.rdr = FootRenderer(
             image_size=256,
             device=device,
@@ -1399,7 +1411,6 @@ class ModelWithLoss(nn.Module):
         )
 
         self.pix_loss = nn.MSELoss()
-
         self.sil_loss = SilhouetteLoss()
         self.contrastive_loss = ContrastiveLoss()
         # self.lpips_loss = LPIPS(net_type='alex').to(self.device).eval()
