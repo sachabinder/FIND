@@ -2,8 +2,9 @@ import torch
 
 from typing import Tuple
 
-from src.model.model import Model
+from src.model.model import Model, process_opts, model_from_opts
 from src.model.renderer import FootRenderer
+from src.train.opts import Opts
 
 
 def optimize_latent_vectors(
@@ -68,6 +69,65 @@ def optimize_latent_vectors(
             print(f"Iteration {i}: Loss: {loss.item()}")
 
     return shapevec.detach(), posevec.detach(), textvec.detach()
+
+
+class FootLatentVectorOptimizer:
+    """
+    Class to optimize the latent vectors of the model to fit the segmented image.
+    """
+
+    def __init__(
+        self,
+        model_options: Opts,
+        segmented_image: torch.tensor,
+        renderer_function: FootRenderer,
+        optimizer_function: torch.optim.Optimizer,
+        learning_rate: float,
+        loss_function: torch.nn.Module,
+    ) -> None:
+        """
+        Initialize the optimizer.
+        """
+
+        # Device, model and optimizer
+        self.device = model_options.device
+        self.model = model_from_opts(model_options)
+        self.loss = loss_function
+
+        # Using the model to evaluate the segmented image
+        self.model = self.model.eval().to(self.device)
+
+        # Images, rendering and mesh
+        self.gt_segm_image = segmented_image
+        self.render_function = renderer_function
+        self.predicted_segm_image = None
+        self.predicted_mesh = None
+
+        # Camera extrinsic parameters
+        # TODO transform as learnable parameters
+        self.camera_rotation = None
+        self.camera_translation = None
+
+        # Latent vectors
+        self.shapevec = torch.randn(
+            1, self.model.shapevec_size, requires_grad=True, device=self.device
+        )
+        self.posevec = torch.randn(
+            1, self.model.posevec_size, requires_grad=True, device=self.device
+        )
+        self.textvec = torch.randn(
+            1, self.model.textvec_size, requires_grad=True, device=self.device
+        )
+
+        # Optimizer
+        self.optimizer = optimizer_function(
+            [self.shapevec, self.posevec, self.textvec], lr=learning_rate
+        )
+
+    def optimize(
+        self, num_iterations: int
+    ) -> Tuple[torch.tensor, torch.tensor, torch.tensor]:
+        pass
 
 
 if __name__ == "__main__":
