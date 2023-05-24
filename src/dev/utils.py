@@ -1,10 +1,13 @@
 import torch
+import numpy as np
+import matplotlib.pyplot as plt
 
 from typing import Tuple, Union
 
 from src.model.model import Model, process_opts, model_from_opts
 from src.model.renderer import FootRenderer
 from src.train.opts import Opts
+from src.utils.logger import Logger
 
 
 class FootLatentVectorOptimizer:
@@ -15,6 +18,7 @@ class FootLatentVectorOptimizer:
     def __init__(
         self,
         model_options: Opts,
+        logger: Logger,
         segmented_image: torch.tensor,
         renderer_function: FootRenderer,
         optimizer_function: torch.optim.Optimizer,
@@ -24,11 +28,14 @@ class FootLatentVectorOptimizer:
         """
         Initialize the optimizer.
         """
+        # Logger
+        self.logger = logger
 
         # Device, model and optimizer
         self.device = model_options.device
         self.model = model_from_opts(model_options)
         self.loss_function = loss_function
+        self.data_history = []
         self.loss_history = []
 
         # Using the model to evaluate the segmented image
@@ -86,7 +93,7 @@ class FootLatentVectorOptimizer:
             )
 
     def optimize(
-        self, num_iterations: int
+        self, num_iterations: int, save_every: int = 10
     ) -> Tuple[torch.tensor, torch.tensor, torch.tensor]:
         """
         Optimize the latent vectors of the model to fit the segmented image.
@@ -128,11 +135,46 @@ class FootLatentVectorOptimizer:
             temp_loss.backward()
             self.optimizer.step()
 
+            if i % save_every == 0:
+                data = {
+                    "step": i,
+                    "shapevec": self.shapevec.detach().cpu().numpy(),
+                    "posevec": self.posevec.detach().cpu().numpy(),
+                    "textvec": self.textvec.detach().cpu().numpy(),
+                    "camera_rotation": self.camera_rotation,
+                    "camera_translation": self.camera_translation,
+                    "mesh": temp_pred_mesh.detach().cpu().numpy(),
+                    "segm_image": temp_pred_segm_image.detach().cpu().numpy(),
+                    "loss": temp_loss.item(),
+                }
+                self.data_history.append(data)
+
+            self.logger.write(f"Step {i} - Loss: {temp_loss.item()}")
+
         # Update prediction
         self.predicted_segm_image = temp_pred_segm_image
         self.predicted_mesh = temp_pred_mesh
 
         return self.shapevec, self.posevec, self.textvec
+
+    def save_history(self, path: str) -> None:
+        """
+        Save the history of the optimization.
+
+        :param path: The path to save the history.
+        """
+        torch.save(self.data_history, path)
+
+    def plot_loss(self, path: str) -> None:
+        """
+        Plot the loss history.
+        """
+
+        plt.plot(np.arange(len(self.loss_history)), self.loss_history)
+        plt.xlabel("Iteration")
+        plt.ylabel("Loss")
+        plt.savefig(path)
+        plt.close()
 
 
 if __name__ == "__main__":
