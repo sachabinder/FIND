@@ -7,70 +7,6 @@ from src.model.renderer import FootRenderer
 from src.train.opts import Opts
 
 
-def optimize_latent_vectors(
-    segmented_image: torch.tensor,
-    model: Model,
-    renderer: FootRenderer,
-    R: torch.tensor,
-    T: torch.tensor,
-    device: torch.device,
-    my_optimizer: torch.optim.Optimizer,
-    learning_rate: float,
-    loss_function: torch.nn.Module,
-) -> Tuple[torch.tensor, torch.tensor, torch.tensor]:
-    """
-    Optimize the latent vectors of the model to fit the segmented image.
-    Here, the camera extrinsic parameters (R, T) are fixed.
-
-    :param segmented_image: The segmented image to fit.
-    :param model: The model to optimize.
-    :param renderer: The renderer to render the mesh.
-    :param R: The rotation matrix of the camera.
-    :param T: The translation vector of the camera.
-    :param device: The device to use.
-    :param my_optimizer: The optimizer to use.
-    :param learning_rate: The learning rate to use.
-    :param loss_function: The loss function to use.
-    :return: The optimized latent vectors.
-    """
-    # Initialize latent vectors
-    shapevec = torch.randn(1, 100, requires_grad=True, device=device)
-    posevec = torch.randn(1, 100, requires_grad=True, device=device)
-    textvec = torch.randn(1, 100, requires_grad=True, device=device)
-
-    # Set up optimizer
-    optimizer = my_optimizer([shapevec, posevec, textvec], lr=learning_rate)
-
-    # Optimization loop
-    num_iterations = 1000
-    for i in range(num_iterations):
-        optimizer.zero_grad()
-
-        # Generate mesh
-        prediction = model.get_meshes(
-            shapevec=shapevec, posevec=posevec, texvec=textvec
-        )
-        mesh = prediction["meshes"]
-
-        # Render mask
-        out = renderer(
-            mesh, R, T, return_images=False, return_mask=True, mask_with_grad=False
-        )
-        rendered_mask = out["mask"]
-
-        # Calculate loss
-        loss = loss_function(rendered_mask, segmented_image)
-
-        # Backward pass
-        loss.backward()
-        optimizer.step()
-
-        if i % 50 == 0:
-            print(f"Iteration {i}: Loss: {loss.item()}")
-
-    return shapevec.detach(), posevec.detach(), textvec.detach()
-
-
 class FootLatentVectorOptimizer:
     """
     Class to optimize the latent vectors of the model to fit the segmented image.
@@ -92,7 +28,8 @@ class FootLatentVectorOptimizer:
         # Device, model and optimizer
         self.device = model_options.device
         self.model = model_from_opts(model_options)
-        self.loss = loss_function
+        self.loss_function = loss_function
+        self.loss_history = []
 
         # Using the model to evaluate the segmented image
         self.model = self.model.eval().to(self.device)
@@ -111,7 +48,7 @@ class FootLatentVectorOptimizer:
         self.camera_rotation = None
         self.camera_translation = None
 
-        # Latent vectors
+        # Latent vectors, random initialization
         self.shapevec = torch.randn(
             1, self.model.shapevec_size, requires_grad=True, device=self.device
         )
@@ -151,7 +88,51 @@ class FootLatentVectorOptimizer:
     def optimize(
         self, num_iterations: int
     ) -> Tuple[torch.tensor, torch.tensor, torch.tensor]:
-        pass
+        """
+        Optimize the latent vectors of the model to fit the segmented image.
+
+        :param num_iterations: The number of iterations to run.
+        :return: The optimized latent vectors.
+        """
+        if self.camera_rotation is None or self.camera_translation is None:
+            raise ValueError(
+                "Camera extrinsic parameters must be set before optimizing."
+            )
+
+        # Optimization loop
+        for i in range(num_iterations):
+            self.optimizer.zero_grad()
+
+            # Generate the mesh
+            temp_prediction = self.model.get_meshes(
+                shapevec=self.shapevec, posevec=self.posevec, textvec=self.textvec
+            )
+            temp_pred_mesh = temp_prediction["mesh"]
+
+            # Render segmented prediction
+            temp_out_render = self.render_function(
+                temp_pred_mesh,
+                self.camera_rotation,
+                self.camera_translation,
+                return_images=False,
+                return_mask=True,
+                mask_with_grad=False,
+            )
+            temp_pred_segm_image = temp_out_render["mask"]
+
+            # Compute loss
+            temp_loss = self.loss_function(temp_pred_segm_image, self.gt_segm_image)
+            self.loss_history.append(temp_loss.item())
+
+            # Backpropagate
+            temp_loss.backward()
+            self.optimizer.step()
+
+        # Update prediction
+        self.predicted_segm_image = temp_pred_segm_image
+        self.predicted_mesh = temp_pred_mesh
+
+        return self.shapevec, self.posevec, self.textvec
 
 
 if __name__ == "__main__":
