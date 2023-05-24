@@ -1,6 +1,6 @@
 import torch
 
-from typing import Tuple
+from typing import Tuple, Union
 
 from src.model.model import Model, process_opts, model_from_opts
 from src.model.renderer import FootRenderer
@@ -99,7 +99,10 @@ class FootLatentVectorOptimizer:
 
         # Images, rendering and mesh
         self.gt_segm_image = segmented_image
-        self.render_function = renderer_function
+        self.image_size = self.gt_segm_image.shape[0]
+        self.render_function = renderer_function(
+            image_size=self.image_size, device=self.device
+        )
         self.predicted_segm_image = None
         self.predicted_mesh = None
 
@@ -123,6 +126,27 @@ class FootLatentVectorOptimizer:
         self.optimizer = optimizer_function(
             [self.shapevec, self.posevec, self.textvec], lr=learning_rate
         )
+
+    def set_camera_extrinsic_parameters(
+        self, param: Union[str, Tuple[torch.tensor, torch.tensor]]
+    ) -> None:
+        """
+        Set the camera extrinsic parameters.
+
+        :param param: Either a string to load the parameters from a file, or a tuple
+            (R, T) containing the rotation matrix and the translation vector.
+        """
+        if isinstance(param, str):
+            (
+                self.camera_rotation,
+                self.camera_translation,
+            ) = self.render_function.view_from(param)
+        elif isinstance(param, tuple):
+            self.camera_rotation, self.camera_translation = param
+        else:
+            raise TypeError(
+                f"Parameter must be either a string or a tuple, not {type(param)} or str should be in ['topdown', 'side1', 'side2', 'toes', '45', '60']."
+            )
 
     def optimize(
         self, num_iterations: int
