@@ -1,13 +1,18 @@
+import init_paths
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
 from typing import Tuple, Union
+from tqdm import tqdm
 
 from src.model.model import Model, process_opts, model_from_opts
 from src.model.renderer import FootRenderer
 from src.train.opts import Opts
 from src.utils.logger import Logger
+
+from pytorch3d.ops import sample_points_from_meshes
+from pytorch3d.loss import chamfer_distance
 
 
 class FootLatentVectorOptimizer:
@@ -24,6 +29,7 @@ class FootLatentVectorOptimizer:
         optimizer_function: torch.optim.Optimizer,
         learning_rate: float,
         loss_function: torch.nn.Module,
+        gt_mesh: torch.tensor = None,
     ) -> None:
         """
         Initialize the optimizer.
@@ -37,13 +43,15 @@ class FootLatentVectorOptimizer:
         self.loss_function = loss_function
         self.data_history = []
         self.loss_history = []
+        self.chamfer_history = []
 
         # Using the model to evaluate the segmented image
         self.model = self.model.eval().to(self.device)
 
         # Images, rendering and mesh
         self.gt_segm_image = segmented_image
-        self.image_size = self.gt_segm_image.shape[0]
+
+        self.image_size = self.gt_segm_image.shape[-1]
         self.render_function = renderer_function(
             image_size=self.image_size, device=self.device
         )
@@ -62,14 +70,18 @@ class FootLatentVectorOptimizer:
         self.posevec = torch.randn(
             1, self.model.posevec_size, requires_grad=True, device=self.device
         )
-        self.textvec = torch.randn(
-            1, self.model.textvec_size, requires_grad=True, device=self.device
+        self.texvec = torch.randn(
+            1, self.model.texvec_size, requires_grad=True, device=self.device
         )
 
         # Optimizer
+        self.learning_rate = learning_rate
         self.optimizer = optimizer_function(
-            [self.shapevec, self.posevec, self.textvec], lr=learning_rate
+            [self.shapevec, self.posevec, self.texvec], lr=learning_rate
         )
+
+        # Ground truth mesh
+        self.gt_mesh = gt_mesh
 
     def set_camera_extrinsic_parameters(
         self, param: Union[str, Tuple[torch.tensor, torch.tensor]]
@@ -112,17 +124,18 @@ class FootLatentVectorOptimizer:
 
             # Generate the mesh
             temp_prediction = self.model.get_meshes(
-                shapevec=self.shapevec, posevec=self.posevec, textvec=self.textvec
+                shapevec=self.shapevec, posevec=self.posevec, texvec=self.texvec
             )
-            temp_pred_mesh = temp_prediction["mesh"]
+
+            temp_pred_mesh = temp_prediction["meshes"]
 
             # Render segmented prediction
             temp_out_render = self.render_function(
                 temp_pred_mesh,
                 self.camera_rotation,
                 self.camera_translation,
-                return_images=False,
                 return_mask=True,
+                return_images=False,
                 mask_with_grad=False,
             )
             temp_pred_segm_image = temp_out_render["mask"]
@@ -136,26 +149,47 @@ class FootLatentVectorOptimizer:
             self.optimizer.step()
 
             if i % save_every == 0:
+                print("")
                 data = {
                     "step": i,
                     "shapevec": self.shapevec.detach().cpu().numpy(),
                     "posevec": self.posevec.detach().cpu().numpy(),
-                    "textvec": self.textvec.detach().cpu().numpy(),
+                    "texvec": self.texvec.detach().cpu().numpy(),
                     "camera_rotation": self.camera_rotation,
                     "camera_translation": self.camera_translation,
-                    "mesh": temp_pred_mesh.detach().cpu().numpy(),
+                    "mesh": temp_pred_mesh.detach().cpu(),
                     "segm_image": temp_pred_segm_image.detach().cpu().numpy(),
                     "loss": temp_loss.item(),
                 }
+
+                # Compute chamfer distance
+                if self.gt_mesh is not None:
+                    samples = 10000
+                    gt_pts = sample_points_from_meshes(
+                        self.gt_mesh, num_samples=samples
+                    )
+                    pred_pts = sample_points_from_meshes(
+                        temp_pred_mesh, num_samples=samples
+                    )
+                    chamf, _ = chamfer_distance(gt_pts, pred_pts)
+                    self.logger.write(
+                        f"Step {i} - Chamfer distance (μm): {chamf.cpu().detach().numpy() * 1e6}"
+                    )
+
+                    data["chamfer_distance"] = chamf.cpu().detach().numpy()
+                    self.chamfer_history.append(chamf.cpu().detach().numpy())
+
+                self.logger.write(f"Step {i} - Loss: {temp_loss.item()}")
                 self.data_history.append(data)
 
-            self.logger.write(f"Step {i} - Loss: {temp_loss.item()}")
+            else:
+                self.logger.add_to_log(f"Step {i} - Loss: {temp_loss.item()}")
 
         # Update prediction
         self.predicted_segm_image = temp_pred_segm_image
         self.predicted_mesh = temp_pred_mesh
 
-        return self.shapevec, self.posevec, self.textvec
+        return self.shapevec, self.posevec, self.texvec
 
     def save_history(self, path: str) -> None:
         """
@@ -163,7 +197,8 @@ class FootLatentVectorOptimizer:
 
         :param path: The path to save the history.
         """
-        torch.save(self.data_history, path)
+        with open(path, "wb") as f:
+            torch.save(self.data_history, f)
 
     def plot_loss(self, path: str) -> None:
         """
@@ -173,6 +208,7 @@ class FootLatentVectorOptimizer:
         plt.plot(np.arange(len(self.loss_history)), self.loss_history)
         plt.xlabel("Iteration")
         plt.ylabel("Loss")
+        plt.title("Loss (MSE)")
         plt.savefig(path)
         plt.close()
 
