@@ -135,8 +135,7 @@ class FootLatentVectorOptimizer:
                 self.camera_rotation,
                 self.camera_translation,
                 return_mask=True,
-                return_images=False,
-                mask_with_grad=False,
+                mask_with_grad=True,
             )
             temp_pred_segm_image = temp_out_render["mask"]
 

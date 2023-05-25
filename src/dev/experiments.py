@@ -42,13 +42,13 @@ def optimize_on_dataset(dataloader: DataLoader, exp_name: str):
     logger = Logger(logfile=os.path.join(out_dir, "log.txt"))
     imsize = 256
     renderer = FootRenderer(image_size=imsize, device=device)
-    R, T = renderer.view_from("topdown")
+    R, T = renderer.view_from("side1")
 
     for template in dataloader:
         logger.write(f"Optimizing latent vector for foot {template['name']} \n")
 
         gt_mesh = template["mesh"]
-        gt_rendered = renderer(gt_mesh, R, T, return_mask=True, mask_with_grad=False)
+        gt_rendered = renderer(gt_mesh, R, T, return_mask=True, mask_with_grad=True)
         gt_segmented = gt_rendered["mask"]
 
         optimizer = FootLatentVectorOptimizer(
@@ -57,7 +57,7 @@ def optimize_on_dataset(dataloader: DataLoader, exp_name: str):
             segmented_image=gt_segmented,
             renderer_function=FootRenderer,
             optimizer_function=torch.optim.Adam,
-            learning_rate=0.001,
+            learning_rate=0.01,
             loss_function=torch.nn.functional.mse_loss,
             gt_mesh=gt_mesh,
         )
@@ -69,8 +69,8 @@ def optimize_on_dataset(dataloader: DataLoader, exp_name: str):
         logger.save()
 
         # export the data
-        optimizer.save_history(f"exp/{exp_name}/history/{template['name']}.pth")
-        optimizer.plot_loss(f"exp/{exp_name}/plots/{template['name']}.png")
+        optimizer.save_history(f"exp/{exp_name}/history/{template['name'][0]}.pth")
+        optimizer.plot_loss(f"exp/{exp_name}/plots/{template['name'][0]}.png")
 
 
 if __name__ == "__main__":
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     This foot is the same as the one used for the tamplate.
     """
     collate_fn = BatchCollator(device=device).collate_batches
-    template_foot = "0003"
+    template_foot = "0008"
     template_dset = Foot3DDataset(
         left_only=True, tpose_only=True, specific_feet=[template_foot], device=device
     )
