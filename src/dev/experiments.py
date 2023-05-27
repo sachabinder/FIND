@@ -71,6 +71,9 @@ def optimize_on_dataset(dataloader: DataLoader, exp_name: str):
         # export the data
         optimizer.save_history(f"exp/{exp_name}/history/{template['name'][0]}.pth")
         optimizer.plot_loss(f"exp/{exp_name}/plots/{template['name'][0]}.png")
+        optimizer.generate_optimized_silhouette_video(
+            f"exp/{exp_name}/plots/{template['name'][0]}.mp4"
+        )
 
 
 if __name__ == "__main__":
@@ -80,7 +83,7 @@ if __name__ == "__main__":
     This foot is the same as the one used for the tamplate.
     """
     collate_fn = BatchCollator(device=device).collate_batches
-    template_foot = "0008"
+    template_foot = "0003"
     template_dset = Foot3DDataset(
         left_only=True, tpose_only=True, specific_feet=[template_foot], device=device
     )

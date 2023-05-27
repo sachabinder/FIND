@@ -1,15 +1,21 @@
 import init_paths
 import torch
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
 
 from typing import Tuple, Union
 from tqdm import tqdm
 
-from src.model.model import Model, process_opts, model_from_opts
+from src.model.model import model_from_opts
 from src.model.renderer import FootRenderer
 from src.train.opts import Opts
 from src.utils.logger import Logger
+from src.dev.viz_tools import (
+    add_image_title,
+    create_combined_image,
+    create_grayscale_video,
+)
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.loss import chamfer_distance
@@ -210,6 +216,67 @@ class FootLatentVectorOptimizer:
         plt.title("Loss (MSE)")
         plt.savefig(path)
         plt.close()
+
+    def generate_optimized_silhouette_video(
+        self, export_path: str, extrinsic_params: Tuple[torch.tensor] = None
+    ) -> None:
+        """
+        Generate a video of the fitting process of the optimized silhouette,
+        next to the ground truth silhouette.
+        The video is by default from the initial point of view of the camera
+        but it can be changed by setting the camera extrinsic parameters by modifying args.
+
+        :param export_path: The path to export the video.
+        :param extrinsic_params: The camera extrinsic parameters.
+        """
+        keys = self.data_history[0].keys()
+        dict_of_lists = {key: [d[key] for d in self.data_history] for key in keys}
+
+        # Generate the video
+        if extrinsic_params is None:
+            images = dict_of_lists["segm_image"]
+            images = [
+                create_combined_image(
+                    add_image_title(
+                        cv2.cvtColor(image[0, 0], cv2.COLOR_GRAY2BGR), "Prediction"
+                    ),
+                    add_image_title(
+                        cv2.cvtColor(
+                            self.gt_segm_image[0, 0].detach().cpu().numpy(),
+                            cv2.COLOR_GRAY2BGR,
+                        ),
+                        "Ground truth",
+                    ),
+                )
+                for image in images
+            ]
+
+        else:
+            meshes = dict_of_lists["mesh"]
+            images = [
+                create_combined_image(
+                    add_image_title(
+                        cv2.cvtColor(
+                            self.render_function(
+                                mesh,
+                                extrinsic_params[0],
+                                extrinsic_params[1],
+                                return_mask=True,
+                                mask_with_grad=True,
+                            )["mask"][0, 0],
+                            cv2.COLOR_GRAY2BGR,
+                        ),
+                        "Prediction",
+                    ),
+                    add_image_title(
+                        cv2.cvtColor(self.gt_segm_image[0, 0], cv2.COLOR_GRAY2BGR),
+                        "Ground truth",
+                    ),
+                )
+                for mesh in meshes
+            ]
+
+        create_grayscale_video(images, export_path, fps=2)
 
 
 if __name__ == "__main__":
