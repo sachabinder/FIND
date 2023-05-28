@@ -32,7 +32,7 @@ def add_image_title(image, title, padding=20, text_height=50):
 
     # Add black text on top of the image
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.8
+    font_scale = 0.6
     text_thickness = 1
     text_size = cv2.getTextSize(title, font, font_scale, text_thickness)[0]
     text_x = (background_width - text_size[0]) // 2
@@ -79,26 +79,16 @@ def create_combined_image(image1, image2):
     return combined_image
 
 
-def create_grayscale_video(images, output_path, fps):
-    """
-    Create a grayscale video from a list of images.
-
-    :param images: The list of images to create the video from.
-    :param output_path: The path to save the video to.
-    :param fps: The frames per second of the video.
-    """
-    # Get the shape of the first image in the list
-    height, width, _ = images[0].shape
+def create_video_from_images(image_list, output_path, fps):
+    # Get the dimensions of the first image in the list
+    height, width, _ = image_list[0].shape
 
     # Define the codec and create a VideoWriter object
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # You can choose other codecs as well
-    video_writer = cv2.VideoWriter(
-        output_path, fourcc, fps, (width, height), isColor=False
-    )
+    video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
-    # Iterate over the list of images and write them to the video
-    for image in images:
-        # Write the BGR image to the video
+    # Iterate over the image list and write each frame to the video
+    for image in image_list:
         video_writer.write(image)
 
     # Release the video writer

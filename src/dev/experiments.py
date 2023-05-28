@@ -70,10 +70,34 @@ def optimize_on_dataset(dataloader: DataLoader, exp_name: str):
 
         # export the data
         optimizer.save_history(f"exp/{exp_name}/history/{template['name'][0]}.pth")
-        optimizer.plot_loss(f"exp/{exp_name}/plots/{template['name'][0]}.png")
+        optimizer.plot_losses(f"exp/{exp_name}/plots/{template['name'][0]}.png")
         optimizer.generate_optimized_silhouette_video(
             f"exp/{exp_name}/plots/{template['name'][0]}.mp4"
         )
+
+
+def generate_renders(file_path: str, exp_name: str):
+    """
+    Function generating the renders for a given latent vector.
+
+    :param file_path: path of pth file to load
+    """
+    out_dir = f"exp/{exp_name}"
+    imsize = 256
+    renderer = FootRenderer(image_size=imsize, device=device)
+    R, T = renderer.view_from("side1")
+    optimizer = FootLatentVectorOptimizer(
+        model_options=opts,
+        logger=None,
+        segmented_image=torch.zeros((1, 1, imsize, imsize), device=device),
+        renderer_function=FootRenderer,
+        optimizer_function=torch.optim.Adam,
+        learning_rate=0.01,
+        loss_function=torch.nn.functional.mse_loss,
+        gt_mesh=None,
+    )
+    optimizer.load_from_file(file_path)
+    optimizer.generate_optimized_silhouette_video(f"exp/{exp_name}/plots/0008-A.mp4")
 
 
 if __name__ == "__main__":
@@ -90,3 +114,6 @@ if __name__ == "__main__":
     template_loader = DataLoader(template_dset, shuffle=False, collate_fn=collate_fn)
 
     optimize_on_dataset(template_loader, "latent_optimization")
+    # generate_renders(
+    #     "exp/latent_optimization/history/0008-A.pth", "latent_optimization"
+    # )

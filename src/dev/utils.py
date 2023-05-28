@@ -14,7 +14,7 @@ from src.utils.logger import Logger
 from src.dev.viz_tools import (
     add_image_title,
     create_combined_image,
-    create_grayscale_video,
+    create_video_from_images,
 )
 
 from pytorch3d.ops import sample_points_from_meshes
@@ -178,7 +178,7 @@ class FootLatentVectorOptimizer:
                     )
                     chamf, _ = chamfer_distance(gt_pts, pred_pts)
                     self.logger.write(
-                        f"Step {i} - Chamfer distance (μm): {chamf.cpu().detach().numpy() * 1e6}"
+                        f"Step {i} - Chamfer distance (μm): {chamf.cpu().detach().numpy() * 1e6} \n"
                     )
 
                     data["chamfer_distance"] = chamf.cpu().detach().numpy()
@@ -205,17 +205,54 @@ class FootLatentVectorOptimizer:
         with open(path, "wb") as f:
             torch.save(self.data_history, f)
 
-    def plot_loss(self, path: str) -> None:
+    def load_from_file(self, path: str) -> None:
+        """
+        Load an instance of the class from a pth file.
+        """
+        with open(path, "rb") as f:
+            data = torch.load(f)
+
+        # Load data
+        self.data_history = data
+
+        best_data = data[-1]
+
+        # Load last optimization step data
+        self.camera_rotation = best_data["camera_rotation"]
+        self.camera_translation = best_data["camera_translation"]
+
+        self.shapevec = torch.tensor(best_data["shapevec"], requires_grad=True)
+        self.posevec = torch.tensor(best_data["posevec"], requires_grad=True)
+        self.texvec = torch.tensor(best_data["texvec"], requires_grad=True)
+
+        self.predicted_mesh = best_data["mesh"]
+        self.predicted_segm_image = best_data["segm_image"]
+
+    def plot_losses(self, path: str) -> None:
         """
         Plot the loss history.
         """
+
+        file_path = path.split("/")
+        file_path[-1] = "MSE_loss" + file_path[-1]
 
         plt.plot(np.arange(len(self.loss_history)), self.loss_history)
         plt.xlabel("Iteration")
         plt.ylabel("Loss")
         plt.title("Loss (MSE)")
-        plt.savefig(path)
+        plt.savefig("/".join(file_path))
         plt.close()
+
+        if len(self.chamfer_history) > 0:
+            file_path = path.split("/")
+            file_path[-1] = "Chamfer_loss" + file_path[-1]
+
+            plt.plot(np.arange(len(self.chamfer_history)), self.chamfer_history)
+            plt.xlabel("Iteration")
+            plt.ylabel("Loss")
+            plt.title("Chamfer distance")
+            plt.savefig("/".join(file_path))
+            plt.close()
 
     def generate_optimized_silhouette_video(
         self, export_path: str, extrinsic_params: Tuple[torch.tensor] = None
@@ -238,7 +275,8 @@ class FootLatentVectorOptimizer:
             images = [
                 create_combined_image(
                     add_image_title(
-                        cv2.cvtColor(image[0, 0], cv2.COLOR_GRAY2BGR), "Prediction"
+                        cv2.cvtColor(image[0, 0], cv2.COLOR_GRAY2BGR),
+                        f"Prediction (step {i})",
                     ),
                     add_image_title(
                         cv2.cvtColor(
@@ -248,7 +286,7 @@ class FootLatentVectorOptimizer:
                         "Ground truth",
                     ),
                 )
-                for image in images
+                for i, image in enumerate(images)
             ]
 
         else:
@@ -276,7 +314,7 @@ class FootLatentVectorOptimizer:
                 for mesh in meshes
             ]
 
-        create_grayscale_video(images, export_path, fps=2)
+        create_video_from_images(images, export_path, fps=2)
 
 
 if __name__ == "__main__":
