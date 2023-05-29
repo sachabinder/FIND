@@ -28,7 +28,9 @@ def add_image_title(image, title, padding=20, text_height=50):
     y = padding
 
     # Place the image on the background
-    background[y : y + height, x : x + width] = image * 255
+    background[y : y + height, x : x + width] = (
+        image if image.dtype == np.uint8 else image * 255
+    )
 
     # Add black text on top of the image
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -93,3 +95,39 @@ def create_video_from_images(image_list, output_path, fps):
 
     # Release the video writer
     video_writer.release()
+
+
+def overlay_images(gt_img, pred_img):
+    """
+    Overlay the ground truth and prediction images.
+
+    :param gt_img: The ground truth image.
+    :param pred_img: The prediction image.
+    """
+    # ensure the images are grayscale
+    if len(gt_img.shape) > 2:
+        gt_img = cv2.cvtColor(gt_img, cv2.COLOR_BGR2GRAY)
+    if len(pred_img.shape) > 2:
+        pred_img = cv2.cvtColor(pred_img, cv2.COLOR_BGR2GRAY)
+
+    # create an empty image for the overlay
+    overlay_img = np.zeros((gt_img.shape[0], gt_img.shape[1], 3), dtype=np.uint8)
+
+    # set the ground truth pixels to green
+    overlay_img[gt_img > 0] = [0, 255, 0]
+
+    # set the prediction pixels to red
+    overlay_img[pred_img > 0] = [0, 0, 255]
+
+    # set the overlapping pixels to white
+    overlay_img[(gt_img > 0) & (pred_img > 0)] = [255, 255, 255]
+
+    # create the legend
+    cv2.putText(
+        overlay_img, "GT", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2
+    )
+    cv2.putText(
+        overlay_img, "Pred", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2
+    )
+
+    return overlay_img

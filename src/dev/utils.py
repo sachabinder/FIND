@@ -15,10 +15,42 @@ from src.dev.viz_tools import (
     add_image_title,
     create_combined_image,
     create_video_from_images,
+    overlay_images,
 )
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.loss import chamfer_distance
+
+from pytorch3d.loss import chamfer_distance
+
+
+def chamfer_loss(mesh1, mesh2):
+    """
+    Computes the average Chamfer distance between two Meshes objects.
+
+    Args:
+        mesh1 (pytorch3d.structures.meshes.Meshes): First batch of meshes.
+        mesh2 (pytorch3d.structures.meshes.Meshes): Second batch of meshes.
+
+    Returns:
+        loss (torch.Tensor): The average Chamfer distance between mesh1 and mesh2.
+    """
+    # Extract the vertices from the meshes
+    points1 = mesh1.verts_list()  # list of tensors of shape (num_verts_i, 3)
+    points2 = mesh2.verts_list()  # list of tensors of shape (num_verts_i, 3)
+
+    loss_total = 0
+    for p1, p2 in zip(points1, points2):
+        # Chamfer_distance expects 3D tensors, so we unsqueeze the 0th dimension
+        p1 = p1.unsqueeze(0)
+        p2 = p2.unsqueeze(0)
+        dist1, _ = chamfer_distance(p1, p2)
+        loss_total += dist1.mean()
+
+    # Compute average loss across all meshes
+    loss_total = loss_total / len(points1)
+
+    return loss_total
 
 
 class FootLatentVectorOptimizer:
@@ -28,6 +60,7 @@ class FootLatentVectorOptimizer:
 
     def __init__(
         self,
+        name: str,
         model_options: Opts,
         logger: Logger,
         segmented_image: torch.tensor,
@@ -41,6 +74,7 @@ class FootLatentVectorOptimizer:
         Initialize the optimizer.
         """
         # Logger
+        self.name = name
         self.logger = logger
 
         # Device, model and optimizer
@@ -111,7 +145,10 @@ class FootLatentVectorOptimizer:
             )
 
     def optimize(
-        self, num_iterations: int, save_every: int = 10
+        self,
+        num_iterations: int,
+        chamfer_supervision: bool = False,
+        save_every: int = 10,
     ) -> Tuple[torch.tensor, torch.tensor, torch.tensor]:
         """
         Optimize the latent vectors of the model to fit the segmented image.
@@ -149,6 +186,9 @@ class FootLatentVectorOptimizer:
             temp_loss = self.loss_function(temp_pred_segm_image, self.gt_segm_image)
             self.loss_history.append(temp_loss.item())
 
+            if chamfer_supervision and self.gt_mesh is not None:
+                temp_loss = chamfer_loss(temp_pred_mesh, self.gt_mesh)
+
             # Backpropagate
             temp_loss.backward()
             self.optimizer.step()
@@ -156,6 +196,7 @@ class FootLatentVectorOptimizer:
             if i % save_every == 0:
                 print("")
                 data = {
+                    "name": self.name,
                     "step": i,
                     "shapevec": self.shapevec.detach().cpu().numpy(),
                     "posevec": self.posevec.detach().cpu().numpy(),
@@ -165,6 +206,8 @@ class FootLatentVectorOptimizer:
                     "mesh": temp_pred_mesh.detach().cpu(),
                     "segm_image": temp_pred_segm_image.detach().cpu().numpy(),
                     "loss": temp_loss.item(),
+                    "gt_segm_image": self.gt_segm_image.detach().cpu().numpy(),
+                    "gt_mesh": self.gt_mesh if self.gt_mesh is not None else None,
                 }
 
                 # Compute chamfer distance
@@ -228,13 +271,16 @@ class FootLatentVectorOptimizer:
         self.predicted_mesh = best_data["mesh"]
         self.predicted_segm_image = best_data["segm_image"]
 
+        self.gt_segm_image = best_data["gt_segm_image"]
+        self.gt_mesh = best_data["gt_mesh"]
+
     def plot_losses(self, path: str) -> None:
         """
         Plot the loss history.
         """
 
         file_path = path.split("/")
-        file_path[-1] = "MSE_loss" + file_path[-1]
+        file_path[-1] = "MSE-loss_" + file_path[-1]
 
         plt.plot(np.arange(len(self.loss_history)), self.loss_history)
         plt.xlabel("Iteration")
@@ -245,7 +291,7 @@ class FootLatentVectorOptimizer:
 
         if len(self.chamfer_history) > 0:
             file_path = path.split("/")
-            file_path[-1] = "Chamfer_loss" + file_path[-1]
+            file_path[-1] = "Chamfer-loss_" + file_path[-1]
 
             plt.plot(np.arange(len(self.chamfer_history)), self.chamfer_history)
             plt.xlabel("Iteration")
@@ -313,6 +359,30 @@ class FootLatentVectorOptimizer:
                 )
                 for mesh in meshes
             ]
+
+        create_video_from_images(images, export_path, fps=2)
+
+    def generate_optimized_overlay_video(self, export_path: str) -> None:
+        """
+        Generate a video of the fitting process of an overlay of the optimized
+        silhouette and the ground truth silhouette.
+
+        :param export_path: The path to export the video.
+        """
+        keys = self.data_history[0].keys()
+        dict_of_lists = {key: [d[key] for d in self.data_history] for key in keys}
+
+        # Generate the video
+        images = dict_of_lists["segm_image"]
+        images = [
+            add_image_title(
+                overlay_images(
+                    self.gt_segm_image[0, 0].detach().cpu().numpy(), image[0, 0]
+                ),
+                f"Prediction (step {i})",
+            )
+            for i, image in enumerate(images)
+        ]
 
         create_video_from_images(images, export_path, fps=2)
 
