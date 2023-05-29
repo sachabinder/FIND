@@ -18,39 +18,9 @@ from src.dev.viz_tools import (
     overlay_images,
 )
 
+
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.loss import chamfer_distance
-
-from pytorch3d.loss import chamfer_distance
-
-
-def chamfer_loss(mesh1, mesh2):
-    """
-    Computes the average Chamfer distance between two Meshes objects.
-
-    Args:
-        mesh1 (pytorch3d.structures.meshes.Meshes): First batch of meshes.
-        mesh2 (pytorch3d.structures.meshes.Meshes): Second batch of meshes.
-
-    Returns:
-        loss (torch.Tensor): The average Chamfer distance between mesh1 and mesh2.
-    """
-    # Extract the vertices from the meshes
-    points1 = mesh1.verts_list()  # list of tensors of shape (num_verts_i, 3)
-    points2 = mesh2.verts_list()  # list of tensors of shape (num_verts_i, 3)
-
-    loss_total = 0
-    for p1, p2 in zip(points1, points2):
-        # Chamfer_distance expects 3D tensors, so we unsqueeze the 0th dimension
-        p1 = p1.unsqueeze(0)
-        p2 = p2.unsqueeze(0)
-        dist1, _ = chamfer_distance(p1, p2)
-        loss_total += dist1.mean()
-
-    # Compute average loss across all meshes
-    loss_total = loss_total / len(points1)
-
-    return loss_total
 
 
 class FootLatentVectorOptimizer:
@@ -117,7 +87,7 @@ class FootLatentVectorOptimizer:
         # Optimizer
         self.learning_rate = learning_rate
         self.optimizer = optimizer_function(
-            [self.shapevec, self.posevec, self.texvec], lr=learning_rate
+            [self.posevec, self.shapevec], lr=learning_rate
         )
 
         # Ground truth mesh
@@ -187,7 +157,15 @@ class FootLatentVectorOptimizer:
             self.loss_history.append(temp_loss.item())
 
             if chamfer_supervision and self.gt_mesh is not None:
-                temp_loss = chamfer_loss(temp_pred_mesh, self.gt_mesh)
+                temp_chamfer = chamfer_distance(
+                    sample_points_from_meshes(
+                        temp_pred_mesh, num_samples=1000, return_normals=False
+                    ),
+                    sample_points_from_meshes(
+                        self.gt_mesh, num_samples=1000, return_normals=False
+                    ),
+                )
+                temp_loss = temp_chamfer[0]
 
             # Backpropagate
             temp_loss.backward()
