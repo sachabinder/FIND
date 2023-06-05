@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 
 from typing import Tuple, Union
 from tqdm import tqdm
+from pytorch3d.ops import sample_points_from_meshes
+from pytorch3d.loss import chamfer_distance
 
 from src.model.model import model_from_opts
 from src.model.renderer import FootRenderer
@@ -17,10 +19,6 @@ from src.dev.viz_tools import (
     create_video_from_images,
     overlay_images,
 )
-
-
-from pytorch3d.ops import sample_points_from_meshes
-from pytorch3d.loss import chamfer_distance
 
 
 class FootLatentVectorOptimizer:
@@ -85,7 +83,6 @@ class FootLatentVectorOptimizer:
         )
 
         # Optimizer
-        self.learning_rate = learning_rate
         self.optimizer = optimizer_function(
             [self.posevec, self.shapevec], lr=learning_rate
         )
@@ -119,12 +116,12 @@ class FootLatentVectorOptimizer:
         num_iterations: int,
         chamfer_supervision: bool = False,
         save_every: int = 10,
-    ) -> Tuple[torch.tensor, torch.tensor, torch.tensor]:
+    ) -> float:
         """
         Optimize the latent vectors of the model to fit the segmented image.
 
         :param num_iterations: The number of iterations to run.
-        :return: The optimized latent vectors.
+        :return: The loss.
         """
         if self.camera_rotation is None or self.camera_translation is None:
             raise ValueError(
@@ -132,7 +129,7 @@ class FootLatentVectorOptimizer:
             )
 
         # Optimization loop
-        for i in range(num_iterations):
+        for i in tqdm(range(num_iterations)):
             self.optimizer.zero_grad()
 
             # Generate the mesh
@@ -172,7 +169,6 @@ class FootLatentVectorOptimizer:
             self.optimizer.step()
 
             if i % save_every == 0:
-                print("")
                 data = {
                     "name": self.name,
                     "step": i,
@@ -198,24 +194,25 @@ class FootLatentVectorOptimizer:
                         temp_pred_mesh, num_samples=samples
                     )
                     chamf, _ = chamfer_distance(gt_pts, pred_pts)
-                    self.logger.write(
-                        f"Step {i} - Chamfer distance (μm): {chamf.cpu().detach().numpy() * 1e6} \n"
-                    )
+                    # self.logger.write(
+                    #     f"Step {i} - Chamfer distance (μm): {chamf.cpu().detach().numpy() * 1e6} \n"
+                    # )
 
                     data["chamfer_distance"] = chamf.cpu().detach().numpy()
                     self.chamfer_history.append(chamf.cpu().detach().numpy())
 
-                self.logger.write(f"Step {i} - Loss: {temp_loss.item()}")
+                # self.logger.write(f"Step {i} - Loss: {temp_loss.item()}")
                 self.data_history.append(data)
 
             else:
-                self.logger.add_to_log(f"Step {i} - Loss: {temp_loss.item()}")
+                pass
+                # self.logger.add_to_log(f"Step {i} - Loss: {temp_loss.item()}")
 
         # Update prediction
         self.predicted_segm_image = temp_pred_segm_image
         self.predicted_mesh = temp_pred_mesh
 
-        return self.shapevec, self.posevec, self.texvec
+        return temp_loss.item()
 
     def save_history(self, path: str) -> None:
         """
@@ -360,6 +357,132 @@ class FootLatentVectorOptimizer:
                 f"Prediction (step {i})",
             )
             for i, image in enumerate(images)
+        ]
+
+        create_video_from_images(images, export_path, fps=2)
+
+
+class ExtrinsicParamsOptimizer:
+    """
+    Class to optimize the extrinsic parameters of a camera for a given segmented image.
+    """
+
+    def __init__(
+        self,
+        template_mesh,
+        device: torch.device,
+        logger: Logger,
+        segmented_image: torch.tensor,
+        renderer_function: FootRenderer,
+        optimizer_function: torch.optim.Optimizer,
+        learning_rate: float,
+        loss_function: torch.nn.Module,
+    ) -> None:
+        self.logger = logger
+        self.device = device
+
+        # Input data
+        self.template_mesh = template_mesh
+        self.segmented_image = segmented_image
+
+        # Renderer
+        self.image_size = self.segmented_image.shape[-1]
+        self.render_function = renderer_function(
+            image_size=self.image_size, device=self.device
+        )
+        self.R, self.T = self.render_function.sample_views()
+
+        # Optimizer
+        self.optimizer_function = optimizer_function
+        self.optimizer = optimizer_function([self.R, self.T], lr=learning_rate)
+
+        # Loss function
+        self.loss_function = loss_function
+        self.loss_history = []
+        self.data_history = []
+
+    def optimize(
+        self,
+        num_iterations: int,
+        save_every: int = 10,
+    ) -> Tuple[torch.tensor, torch.tensor]:
+        """
+        Optimize the extrinsic parameters of the camera.
+        """
+        # Optimization loop
+        for i in range(num_iterations):
+            self.optimizer.zero_grad()
+
+            # Render segmented prediction
+            temp_prediction = self.render_function(
+                self.template_mesh,
+                self.R,
+                self.T,
+                return_mask=True,
+                mask_with_grad=True,
+            )
+
+            temp_pred_segm_image = temp_prediction["mask"]
+
+            # Compute loss
+            temp_loss = self.loss_function(temp_pred_segm_image, self.segmented_image)
+            self.loss_history.append(temp_loss.item())
+
+            # Backpropagate
+            temp_loss.backward()
+            self.optimizer.step()
+
+            if i % save_every == 0:
+                print("")
+                data = {
+                    "step": i,
+                    "camera_rotation": self.R.detach().cpu().numpy(),
+                    "camera_translation": self.T.detach().cpu().numpy(),
+                    "segm_image": temp_pred_segm_image.detach().cpu().numpy(),
+                    "loss": temp_loss.item(),
+                    "gt_segm_image": self.segmented_image,
+                }
+                self.data_history.append(data)
+                # self.logger.write(f"Step {i} - Loss: {temp_loss.item()}")
+
+            else:
+                self.logger.add_to_log(f"Step {i} - Loss: {temp_loss.item()}")
+
+        # Update prediction
+        self.predicted_segm_image = temp_pred_segm_image
+
+        return self.R, self.T
+
+    def plot_losses(self, path: str) -> None:
+        """
+        Plot the loss history.
+        """
+
+        file_path = path.split("/")
+        file_path[-1] = "MSE-loss_" + file_path[-1]
+
+        plt.plot(np.arange(len(self.loss_history)), self.loss_history)
+        plt.xlabel("Iteration")
+        plt.ylabel("Loss")
+        plt.title("Loss (MSE)")
+        plt.savefig("/".join(file_path))
+        plt.close()
+
+    def generate_optimized_overlay_video(self, export_path: str) -> None:
+        """
+        Generate a video of the fitting process of an overlay of the optimized
+        silhouette and the ground truth silhouette.
+
+        :param export_path: The path to export the video.
+        """
+
+        # Generate the video
+        images = [
+            add_image_title(
+                overlay_images(data["gt_segm_image"], data["segm_image"]),
+                f"Prediction (step {i})",
+            )
+            for i, data in enumerate(self.data_history)
         ]
 
         create_video_from_images(images, export_path, fps=2)

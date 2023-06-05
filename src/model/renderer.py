@@ -227,7 +227,6 @@ class FootRenderer(nn.Module):
         azim_max=None,
         at=((0, 0, 0),),
     ):
-
         if dist_min is not None:
             dist = np.linspace(dist_min, dist_max, nviews)
 
