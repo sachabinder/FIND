@@ -534,3 +534,42 @@ class FootRenderer(nn.Module):
             out["features"] = feat_renders
 
         return out
+
+
+def colorize_distance_error(mesh1: Meshes, mesh2: Meshes) -> Meshes:
+    """
+    Colorize the distance error between two meshes.
+    The template mesh is the mesh1 (the plot that would be colored).
+
+    :param mesh1: The first mesh.
+    :param mesh2: The second mesh.
+    :return: A Meshes object with colored vertices.
+    """
+    device = mesh1.device
+
+    # Compute distance error (assuming the meshes have the same topology).
+    distance_error = [
+        torch.norm(v1 - v2, dim=-1)
+        for v1, v2 in zip(mesh1.verts_list(), mesh2.verts_list())
+    ]
+
+    # Normalize the distance error to the range [0, 1].
+    distance_error = [(d - d.min()) / (d.max() - d.min()) for d in distance_error]
+
+    # Create RGB colors: Use distance error for the red channel and zero for green and blue channels.
+    colors = [
+        torch.stack([d, torch.zeros_like(d), torch.zeros_like(d)], dim=-1)
+        for d in distance_error
+    ]
+
+    # Create TexturesVertex for the colored mesh.
+    textures = TexturesVertex(verts_features=[c.to(device) for c in colors])
+
+    # Create a new Meshes object for the colored mesh.
+    colored_mesh = Meshes(
+        verts=mesh1.verts_list(),  # Reuse the vertex positions from the first mesh.
+        faces=mesh1.faces_list(),  # Reuse the topology from the first mesh.
+        textures=textures,  # Use the new vertex colors.
+    )
+
+    return colored_mesh

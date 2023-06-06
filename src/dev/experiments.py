@@ -22,7 +22,7 @@ from src.eval.eval_metrics import IOU
 
 
 # =============== Device config ===============
-gpu = 1
+gpu = 2
 if torch.cuda.is_available():
     torch.cuda.set_device(gpu)
     device = f"cuda:{gpu}"
@@ -69,8 +69,8 @@ def optimize_on_dataset(dataloader: DataLoader, exp_name: str):
             segmented_image=gt_segmented,
             renderer_function=FootRenderer,
             optimizer_function=torch.optim.SGD,
-            learning_rate=0.1,
-            loss_function=torch.nn.functional.l1_loss,
+            learning_rate=0.2,
+            loss_function=torch.nn.functional.mse_loss,
             gt_mesh=gt_mesh,
         )
 
@@ -81,14 +81,31 @@ def optimize_on_dataset(dataloader: DataLoader, exp_name: str):
         logger.save()
 
         # export the data
-        optimizer.save_history(f"exp/{exp_name}/history/{template['name'][0]}.pth")
+        # optimizer.save_history(f"exp/{exp_name}/history/{template['name'][0]}.pth")
         optimizer.plot_losses(f"exp/{exp_name}/plots/{template['name'][0]}.png")
-        optimizer.generate_optimized_silhouette_video(
-            f"exp/{exp_name}/plots/{template['name'][0]}.mp4"
-        )
-        optimizer.generate_optimized_overlay_video(
-            f"exp/{exp_name}/plots/{template['name'][0]}_overlay.mp4"
-        )
+        # optimizer.generate_optimized_silhouette_video(
+        #     f"exp/{exp_name}/plots/{template['name'][0]}.mp4"
+        # )
+        # optimizer.generate_optimized_overlay_video(
+        #     f"exp/{exp_name}/plots/{template['name'][0]}_overlay.mp4"
+        # )
+
+        # coputation of interesing metrics
+        predicted_mesh = optimizer.predicted_mesh
+        predicted_segm_image = optimizer.predicted_segm_image
+
+        l2_loss = torch.nn.functional.mse_loss(predicted_segm_image, gt_segmented)
+        l1_loss = torch.nn.functional.l1_loss(predicted_segm_image, gt_segmented)
+        iou_metric = IOU(predicted_segm_image, gt_segmented)
+
+        # compute the chamfer distance
+        samples = 10000
+        gt_pts = sample_points_from_meshes(gt_mesh, num_samples=samples)
+        pred_pts = sample_points_from_meshes(predicted_mesh, num_samples=samples)
+        chamf, _ = chamfer_distance(gt_pts, pred_pts)
+
+        # log the results
+        print(f"{template['name'][0]}, {l1_loss}, {l2_loss}, {chamf*1e6}, {iou_metric}")
 
         del optimizer
 
@@ -171,7 +188,7 @@ def test_loss_l1(dataloader: DataLoader, exp_name: str = "loss_l1"):
     imsize = 256
     renderer = FootRenderer(image_size=imsize, device=device)
     R, T = renderer.view_from("45")
-    NUM_ITERATIONS = 2000
+    NUM_ITERATIONS = 1000
 
     logger.add_to_log(f"Tamplate name, L1 loss, L2 loss, chamfer distance (µm), IoU")
     print(f"Tamplate name, L1 loss, L2 loss, chamfer distance (µm), IoU")
@@ -188,7 +205,7 @@ def test_loss_l1(dataloader: DataLoader, exp_name: str = "loss_l1"):
             segmented_image=gt_segmented,
             renderer_function=FootRenderer,
             optimizer_function=torch.optim.SGD,
-            learning_rate=0.01,
+            learning_rate=0.1,
             loss_function=torch.nn.functional.l1_loss,
             gt_mesh=gt_mesh,
         )
@@ -220,19 +237,317 @@ def test_loss_l1(dataloader: DataLoader, exp_name: str = "loss_l1"):
 
         logger.save()
 
+        # plot the results
+        optimizer.plot_losses(
+            f"exp/{exp_name}/plots/{optimizer.name}_losses_l1optim.png"
+        )
 
-# Experiment 1: find the best learning rate
-def find_best_learning_rate(dataloader: DataLoader, exp_name: str = "best_lr"):
+        del optimizer
+
+
+def test_loss_l2(dataloader: DataLoader, exp_name: str = "loss_l1"):
+    """
+    Function taking a dataloader as input and finding the best loss function
+    by extrapolating losses form the dataset.
+    """
+    out_dir = f"exp/{exp_name}"
+    logger = Logger(logfile=os.path.join(out_dir, "log.txt"))
+
+    logger.add_to_log(
+        f"\n\n\n ################ Experiment {exp_name} ran at {datetime.datetime.now()} ################ \n\n\n"
+    )
+    print(
+        f"\n\n\n ################ Experiment {exp_name} ran at {datetime.datetime.now()} ################ \n\n\n"
+    )
+
+    imsize = 256
+    renderer = FootRenderer(image_size=imsize, device=device)
+    R, T = renderer.view_from("45")
+    NUM_ITERATIONS = 1000
+
+    logger.add_to_log(f"Tamplate name, L1 loss, L2 loss, chamfer distance (µm), IoU")
+    print(f"Tamplate name, L1 loss, L2 loss, chamfer distance (µm), IoU")
+
+    for template in dataloader:
+        gt_mesh = template["mesh"]
+        gt_rendered = renderer(gt_mesh, R, T, return_mask=True, mask_with_grad=True)
+        gt_segmented = gt_rendered["mask"]
+
+        optimizer = FootLatentVectorOptimizer(
+            name=template["name"][0],
+            model_options=opts,
+            logger=logger,
+            segmented_image=gt_segmented,
+            renderer_function=FootRenderer,
+            optimizer_function=torch.optim.SGD,
+            learning_rate=0.1,
+            loss_function=torch.nn.functional.mse_loss,
+            gt_mesh=gt_mesh,
+        )
+
+        optimizer.set_camera_extrinsic_parameters((R, T))
+        final_loss = optimizer.optimize(
+            num_iterations=NUM_ITERATIONS, chamfer_supervision=False
+        )
+
+        # coputation of interesing metrics
+        predicted_mesh = optimizer.predicted_mesh
+        predicted_segm_image = optimizer.predicted_segm_image
+
+        l2_loss = torch.nn.functional.mse_loss(predicted_segm_image, gt_segmented)
+        l1_loss = torch.nn.functional.l1_loss(predicted_segm_image, gt_segmented)
+        iou_metric = IOU(predicted_segm_image, gt_segmented)
+
+        # compute the chamfer distance
+        samples = 10000
+        gt_pts = sample_points_from_meshes(gt_mesh, num_samples=samples)
+        pred_pts = sample_points_from_meshes(predicted_mesh, num_samples=samples)
+        chamf, _ = chamfer_distance(gt_pts, pred_pts)
+
+        # log the results
+        logger.add_to_log(
+            f"{template['name'][0]}, {l1_loss}, {l2_loss}, {chamf*1e6}, {iou_metric}"
+        )
+        print(f"{template['name'][0]}, {l1_loss}, {l2_loss}, {chamf*1e6}, {iou_metric}")
+
+        logger.save()
+
+        # plot the results
+        optimizer.plot_losses(
+            f"exp/{exp_name}/plots/{optimizer.name}_losses_l2optim.png"
+        )
+
+        del optimizer
+
+
+# Experiment 2: find the best learning rate
+def test_best_lr(dataloader: DataLoader, lr_list: list, exp_name: str = "best_lr"):
     """
     Function taking a dataloader as input and finding the best learning rate
     by extrapolating losses form the dataset.
     """
-    learning_rates = [0.1, 0.01, 0.001, 0.0001]
     out_dir = f"exp/{exp_name}"
     logger = Logger(logfile=os.path.join(out_dir, "log.txt"))
-    logger.write(
+
+    logger.add_to_log(
         f"\n\n\n ################ Experiment {exp_name} ran at {datetime.datetime.now()} ################ \n\n\n"
     )
+    print(
+        f"\n\n\n ################ Experiment {exp_name} ran at {datetime.datetime.now()} ################ \n\n\n"
+    )
+
+    imsize = 256
+    renderer = FootRenderer(image_size=imsize, device=device)
+    R, T = renderer.view_from("45")
+    NUM_ITERATIONS = 1000
+
+    for lr in lr_list:
+        logger.add_to_log(f"Learning rate: {lr} \n\n")
+        print(f"Learning rate: {lr} \n\n")
+        logger.add_to_log(
+            f"Tamplate name, L1 loss, L2 loss, chamfer distance (µm), IoU"
+        )
+        print(f"Tamplate name, L1 loss, L2 loss, chamfer distance (µm), IoU")
+        for template in dataloader:
+            gt_mesh = template["mesh"]
+            gt_rendered = renderer(gt_mesh, R, T, return_mask=True, mask_with_grad=True)
+            gt_segmented = gt_rendered["mask"]
+
+            optimizer = FootLatentVectorOptimizer(
+                name=template["name"][0],
+                model_options=opts,
+                logger=logger,
+                segmented_image=gt_segmented,
+                renderer_function=FootRenderer,
+                optimizer_function=torch.optim.SGD,
+                learning_rate=lr,
+                loss_function=torch.nn.functional.mse_loss,
+                gt_mesh=gt_mesh,
+            )
+
+            optimizer.set_camera_extrinsic_parameters((R, T))
+            final_loss = optimizer.optimize(
+                num_iterations=NUM_ITERATIONS, chamfer_supervision=False
+            )
+
+            # coputation of interesing metrics
+            predicted_mesh = optimizer.predicted_mesh
+            predicted_segm_image = optimizer.predicted_segm_image
+
+            l2_loss = torch.nn.functional.mse_loss(predicted_segm_image, gt_segmented)
+            l1_loss = torch.nn.functional.l1_loss(predicted_segm_image, gt_segmented)
+            iou_metric = IOU(predicted_segm_image, gt_segmented)
+
+            # compute the chamfer distance
+            samples = 10000
+            gt_pts = sample_points_from_meshes(gt_mesh, num_samples=samples)
+            pred_pts = sample_points_from_meshes(predicted_mesh, num_samples=samples)
+            chamf, _ = chamfer_distance(gt_pts, pred_pts)
+
+            # log the results
+            logger.add_to_log(
+                f"{template['name'][0]}, {l1_loss}, {l2_loss}, {chamf*1e6}, {iou_metric}"
+            )
+            print(
+                f"{template['name'][0]}, {l1_loss}, {l2_loss}, {chamf*1e6}, {iou_metric}"
+            )
+
+            logger.save()
+
+            # plot the results
+            optimizer.plot_losses(
+                f"exp/{exp_name}/plots/{optimizer.name}_losses_l2_lr{lr}.png"
+            )
+
+            del optimizer
+
+
+# Experiment 3: find optimal number of iterations
+def test_best_iter_numb(
+    dataloader: DataLoader, num_iter: int, exp_name: str = "best_iter_numb"
+):
+    """
+    Function taking a dataloader as input and finding the best iter number
+    by extrapolating losses form the dataset.
+    """
+    out_dir = f"exp/{exp_name}"
+    logger = Logger(logfile=os.path.join(out_dir, "log.txt"))
+
+    logger.add_to_log(
+        f"\n\n\n ################ Experiment {exp_name} ran at {datetime.datetime.now()} ################ \n\n\n"
+    )
+    print(
+        f"\n\n\n ################ Experiment {exp_name} ran at {datetime.datetime.now()} ################ \n\n\n"
+    )
+
+    imsize = 256
+    renderer = FootRenderer(image_size=imsize, device=device)
+    R, T = renderer.view_from("45")
+
+    logger.add_to_log(f"Tamplate name, L1 loss, L2 loss, chamfer distance (µm), IoU")
+    print(f"Tamplate name, L1 loss, L2 loss, chamfer distance (µm), IoU")
+
+    for template in dataloader:
+        gt_mesh = template["mesh"]
+        gt_rendered = renderer(gt_mesh, R, T, return_mask=True, mask_with_grad=True)
+        gt_segmented = gt_rendered["mask"]
+
+        optimizer = FootLatentVectorOptimizer(
+            name=template["name"][0],
+            model_options=opts,
+            logger=logger,
+            segmented_image=gt_segmented,
+            renderer_function=FootRenderer,
+            optimizer_function=torch.optim.SGD,
+            learning_rate=0.1,
+            loss_function=torch.nn.functional.mse_loss,
+            gt_mesh=gt_mesh,
+        )
+
+        optimizer.set_camera_extrinsic_parameters((R, T))
+        final_loss = optimizer.optimize(
+            num_iterations=num_iter, chamfer_supervision=False
+        )
+
+        # coputation of interesing metrics
+        predicted_mesh = optimizer.predicted_mesh
+        predicted_segm_image = optimizer.predicted_segm_image
+
+        l2_loss = torch.nn.functional.mse_loss(predicted_segm_image, gt_segmented)
+        l1_loss = torch.nn.functional.l1_loss(predicted_segm_image, gt_segmented)
+        iou_metric = IOU(predicted_segm_image, gt_segmented)
+
+        # compute the chamfer distance
+        samples = 10000
+        gt_pts = sample_points_from_meshes(gt_mesh, num_samples=samples)
+        pred_pts = sample_points_from_meshes(predicted_mesh, num_samples=samples)
+        chamf, _ = chamfer_distance(gt_pts, pred_pts)
+
+        # log the results
+        logger.add_to_log(
+            f"{template['name'][0]}, {l1_loss}, {l2_loss}, {chamf*1e6}, {iou_metric}"
+        )
+        print(f"{template['name'][0]}, {l1_loss}, {l2_loss}, {chamf*1e6}, {iou_metric}")
+
+        logger.save()
+
+        # plot the results
+        optimizer.plot_losses(
+            f"exp/{exp_name}/plots/{optimizer.name}_losses_l2optim.png"
+        )
+
+        del optimizer
+
+
+# Experiment 4: camera position
+def test_camera(dataloader: DataLoader, camera_view: str, exp_name: str = "loss_l1"):
+    """
+    Function taking a dataloader as input and finding the best camera position
+    by extrapolating losses form the dataset.
+    """
+    out_dir = f"exp/{exp_name}"
+    logger = Logger(logfile=os.path.join(out_dir, "log.txt"))
+
+    logger.add_to_log(
+        f"\n\n\n ################ Experiment {exp_name} ran at {datetime.datetime.now()} ################ \n\n\n"
+    )
+    print(
+        f"\n\n\n ################ Experiment {exp_name} ran at {datetime.datetime.now()} ################ \n\n\n"
+    )
+
+    imsize = 256
+    renderer = FootRenderer(image_size=imsize, device=device)
+    R, T = renderer.view_from(camera_view)
+    NUM_ITERATIONS = 1000
+
+    logger.add_to_log(f"Tamplate name, L1 loss, L2 loss, chamfer distance (µm), IoU")
+    print(f"Tamplate name, L1 loss, L2 loss, chamfer distance (µm), IoU")
+
+    for template in dataloader:
+        gt_mesh = template["mesh"]
+        gt_rendered = renderer(gt_mesh, R, T, return_mask=True, mask_with_grad=True)
+        gt_segmented = gt_rendered["mask"]
+
+        optimizer = FootLatentVectorOptimizer(
+            name=template["name"][0],
+            model_options=opts,
+            logger=logger,
+            segmented_image=gt_segmented,
+            renderer_function=FootRenderer,
+            optimizer_function=torch.optim.SGD,
+            learning_rate=0.1,
+            loss_function=torch.nn.functional.mse_loss,
+            gt_mesh=gt_mesh,
+        )
+
+        optimizer.set_camera_extrinsic_parameters((R, T))
+        final_loss = optimizer.optimize(
+            num_iterations=NUM_ITERATIONS, chamfer_supervision=False
+        )
+
+        # coputation of interesing metrics
+        predicted_mesh = optimizer.predicted_mesh
+        predicted_segm_image = optimizer.predicted_segm_image
+
+        l2_loss = torch.nn.functional.mse_loss(predicted_segm_image, gt_segmented)
+        l1_loss = torch.nn.functional.l1_loss(predicted_segm_image, gt_segmented)
+        iou_metric = IOU(predicted_segm_image, gt_segmented)
+
+        # compute the chamfer distance
+        samples = 10000
+        gt_pts = sample_points_from_meshes(gt_mesh, num_samples=samples)
+        pred_pts = sample_points_from_meshes(predicted_mesh, num_samples=samples)
+        chamf, _ = chamfer_distance(gt_pts, pred_pts)
+
+        # log the results
+        logger.add_to_log(
+            f"{template['name'][0]}, {l1_loss}, {l2_loss}, {chamf*1e6}, {iou_metric}"
+        )
+        print(f"{template['name'][0]}, {l1_loss}, {l2_loss}, {chamf*1e6}, {iou_metric}")
+
+        logger.save()
+
+        del optimizer
 
 
 if __name__ == "__main__":
@@ -243,14 +558,33 @@ if __name__ == "__main__":
     """
     collate_fn = BatchCollator(device=device).collate_batches
     template_foot = [
-        "0008",
+        "0003",
     ]
-    template_dset = Foot3DDataset(left_only=True, device=device)
+    template_dset = Foot3DDataset(
+        left_only=True,
+        device=device,
+    )
     print(f"Dataset size: {len(template_dset)}")
     template_loader = DataLoader(template_dset, shuffle=False, collate_fn=collate_fn)
 
-    # optimize_on_dataset(template_loader, "latent_optimization")
+    # optimize_on_dataset(template_loader, "latent_optimization_test")
     # generate_renders(
     #     f"exp/latent_optimization/history/{template_foot}-A.pth", "latent_optimization"
     # )
-    test_loss_l1(template_loader, "loss_l1")
+
+    # test_loss_l1(template_loader, "loss_l1")
+    # test_loss_l2(template_loader, "loss_l2")
+
+    # test_best_lr(template_loader, [1, 0.8, 0.6], "best_lr")
+    # test_best_lr(template_loader, [0.4, 0.2, 0.1], "best_lr2")
+    # test_best_lr(template_loader, [0.05, 0.01, 0.001], "best_lr3")
+
+    # test_best_iter_numb(template_loader, 500, "500_iter")
+    # test_best_iter_numb(template_loader, 1000, "1000_iter")
+    # test_best_iter_numb(template_loader, 1500, "1500_iter")
+
+    # test_camera(template_loader, "topdown", "topdown")
+    # test_camera(template_loader, "side1", "side1")
+    # test_camera(template_loader, "side2", "side2")
+    # test_camera(template_loader, "45", "45")
+    # test_camera(template_loader, "60", "60")
